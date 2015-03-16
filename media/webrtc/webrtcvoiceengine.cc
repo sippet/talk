@@ -74,6 +74,7 @@ static const CodecPref kCodecPrefs[] = {
   { "ISAC",   32000,  1, 104, true },
   { "CELT",   32000,  1, 109, true },
   { "CELT",   32000,  2, 110, true },
+  { "G729",    8000,  1, 18,  false },
   // G722 should be advertised as 8000 Hz because of the RFC "bug".
   { "G722",   8000,   1, 9,   false },
   { "ILBC",   8000,   1, 102, false },
