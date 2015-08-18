@@ -62,7 +62,7 @@ class RTCCreateSessionDescriptionObserver
     _peerConnection = peerConnection;
   }
 
-  virtual void OnSuccess(SessionDescriptionInterface* desc) OVERRIDE {
+  void OnSuccess(SessionDescriptionInterface* desc) override {
     RTCSessionDescription* session =
         [[RTCSessionDescription alloc] initWithSessionDescription:desc];
     [_delegate peerConnection:_peerConnection
@@ -71,7 +71,7 @@ class RTCCreateSessionDescriptionObserver
     delete desc;
   }
 
-  virtual void OnFailure(const std::string& error) OVERRIDE {
+  void OnFailure(const std::string& error) override {
     NSString* str = @(error.c_str());
     NSError* err =
         [NSError errorWithDomain:kRTCSessionDescriptionDelegateErrorDomain
@@ -95,12 +95,12 @@ class RTCSetSessionDescriptionObserver : public SetSessionDescriptionObserver {
     _peerConnection = peerConnection;
   }
 
-  virtual void OnSuccess() OVERRIDE {
+  void OnSuccess() override {
     [_delegate peerConnection:_peerConnection
         didSetSessionDescriptionWithError:nil];
   }
 
-  virtual void OnFailure(const std::string& error) OVERRIDE {
+  void OnFailure(const std::string& error) override {
     NSString* str = @(error.c_str());
     NSError* err =
         [NSError errorWithDomain:kRTCSessionDescriptionDelegateErrorDomain
@@ -123,7 +123,7 @@ class RTCStatsObserver : public StatsObserver {
     _peerConnection = peerConnection;
   }
 
-  virtual void OnComplete(const StatsReports& reports) OVERRIDE {
+  void OnComplete(const StatsReports& reports) override {
     NSMutableArray* stats = [NSMutableArray arrayWithCapacity:reports.size()];
     for (const auto* report : reports) {
       RTCStatsReport* statsReport =
@@ -281,6 +281,21 @@ class RTCStatsObserver : public StatsObserver {
     _peerConnection = factory->CreatePeerConnection(
         iceServers, constraints, NULL, NULL, _observer.get());
     _localStreams = [[NSMutableArray alloc] init];
+  }
+  return self;
+}
+
+- (instancetype)initWithFactory:(webrtc::PeerConnectionFactoryInterface *)factory
+                         config:(const webrtc::PeerConnectionInterface::RTCConfiguration &)config
+                    constraints:(const webrtc::MediaConstraintsInterface *)constraints
+                       delegate:(id<RTCPeerConnectionDelegate>)delegate {
+  NSParameterAssert(factory);
+  if (self = [super init]) {
+    _observer.reset(new webrtc::RTCPeerConnectionObserver(self));
+    _peerConnection =
+        factory->CreatePeerConnection(config, constraints, nullptr, nullptr, _observer.get());
+    _localStreams = [[NSMutableArray alloc] init];
+    _delegate = delegate;
   }
   return self;
 }

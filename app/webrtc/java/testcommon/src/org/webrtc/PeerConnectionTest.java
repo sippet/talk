@@ -59,7 +59,6 @@ public class PeerConnectionTest {
     private int expectedIceCandidates = 0;
     private int expectedErrors = 0;
     private int expectedRenegotiations = 0;
-    private int expectedSetSize = 0;
     private int previouslySeenWidth = 0;
     private int previouslySeenHeight = 0;
     private int expectedFramesDelivered = 0;
@@ -106,25 +105,15 @@ public class PeerConnectionTest {
     @Override
     public synchronized void onIceCandidate(IceCandidate candidate) {
       --expectedIceCandidates;
+
       // We don't assert expectedIceCandidates >= 0 because it's hard to know
       // how many to expect, in general.  We only use expectIceCandidates to
       // assert a minimal count.
       gotIceCandidates.add(candidate);
     }
 
-    public synchronized void expectSetSize() {
-      if (RENDER_TO_GUI) {
-        // When new frames are delivered to the GUI renderer we don't get
-        // notified of frame size info.
-        return;
-      }
-      ++expectedSetSize;
-    }
-
-    @Override
-    public synchronized void setSize(int width, int height) {
+    private synchronized void setSize(int width, int height) {
       assertFalse(RENDER_TO_GUI);
-      assertTrue(--expectedSetSize >= 0);
       // Because different camera devices (fake & physical) produce different
       // resolutions, we only sanity-check the set sizes,
       assertTrue(width > 0);
@@ -145,7 +134,14 @@ public class PeerConnectionTest {
 
     @Override
     public synchronized void renderFrame(VideoRenderer.I420Frame frame) {
+      setSize(frame.width, frame.height);
       --expectedFramesDelivered;
+    }
+
+    // TODO(guoweis): Remove this once chrome code base is updated.
+    @Override
+    public boolean canApplyRotation() {
+      return false;
     }
 
     public synchronized void expectSignalingChange(SignalingState newState) {
@@ -171,7 +167,17 @@ public class PeerConnectionTest {
         return;
       }
 
+      if (expectedIceConnectionChanges.isEmpty()) {
+        System.out.println(name + "Got an unexpected ice connection change " + newState);
+        return;
+      }
+
       assertEquals(expectedIceConnectionChanges.removeFirst(), newState);
+    }
+
+    @Override
+    public synchronized void onIceConnectionReceivingChange(boolean receiving) {
+      System.out.println(name + "Got an ice connection receiving change " + receiving);
     }
 
     public synchronized void expectIceGatheringChange(
@@ -258,6 +264,11 @@ public class PeerConnectionTest {
     }
 
     @Override
+    public synchronized void onBufferedAmountChange(long previousAmount) {
+      assertFalse(previousAmount == dataChannel.bufferedAmount());
+    }
+
+    @Override
     public synchronized void onStateChange() {
       assertEquals(expectedStateChanges.removeFirst(), dataChannel.state());
     }
@@ -313,9 +324,6 @@ public class PeerConnectionTest {
       if (expectedRemoveStreamLabels.size() != 0) {
         stillWaitingForExpectations.add(
             "expectedRemoveStreamLabels: " + expectedRemoveStreamLabels.size());
-      }
-      if (expectedSetSize != 0) {
-        stillWaitingForExpectations.add("expectedSetSize");
       }
       if (expectedFramesDelivered > 0) {
         stillWaitingForExpectations.add(
@@ -435,8 +443,7 @@ public class PeerConnectionTest {
     public int height = -1;
     public int numFramesDelivered = 0;
 
-    @Override
-    public void setSize(int width, int height) {
+    private void setSize(int width, int height) {
       assertEquals(this.width, -1);
       assertEquals(this.height, -1);
       this.width = width;
@@ -446,6 +453,12 @@ public class PeerConnectionTest {
     @Override
     public void renderFrame(VideoRenderer.I420Frame frame) {
       ++numFramesDelivered;
+    }
+
+    // TODO(guoweis): Remove this once chrome code base is updated.
+    @Override
+    public boolean canApplyRotation() {
+      return false;
     }
   }
 
@@ -494,9 +507,19 @@ public class PeerConnectionTest {
   }
 
   void finalizeThreadCheck() throws Exception {
-    TreeSet<String> threadsAfterTest = allThreads();
-    assertEquals(threadsBeforeTest, threadsAfterTest);
-    Thread.sleep(100);
+    // TreeSet<String> threadsAfterTest = allThreads();
+
+    // TODO(tommi): Figure out a more reliable way to do this test.  As is
+    // we're seeing three possible 'normal' situations:
+    // 1.  before and after sets are equal.
+    // 2.  before contains 3 threads that do not exist in after.
+    // 3.  after contains 3 threads that do not exist in before.
+    //
+    // Maybe it would be better to do the thread enumeration from C++ and get
+    // the thread names as well, in order to determine what these 3 threads are.
+
+    // assertEquals(threadsBeforeTest, threadsAfterTest);
+    // Thread.sleep(100);
   }
 
   void doTest() throws Exception {
@@ -507,6 +530,12 @@ public class PeerConnectionTest {
     //     "/tmp/PeerConnectionTest-log.txt",
     //     EnumSet.of(Logging.TraceLevel.TRACE_ALL),
     //     Logging.Severity.LS_SENSITIVE);
+
+    // Allow loopback interfaces too since our Android devices often don't
+    // have those.
+    PeerConnectionFactory.Options options = new PeerConnectionFactory.Options();
+    options.networkIgnoreMask = 0;
+    factory.setOptions(options);
 
     MediaConstraints pcConstraints = new MediaConstraints();
     pcConstraints.mandatory.add(
@@ -535,7 +564,6 @@ public class PeerConnectionTest {
     VideoSource videoSource = factory.createVideoSource(
         VideoCapturer.create(""), new MediaConstraints());
 
-    offeringExpectations.expectSetSize();
     offeringExpectations.expectRenegotiationNeeded();
     WeakReference<MediaStream> oLMS = addTracksToPC(
         factory, offeringPC, videoSource, "offeredMediaStream",
@@ -567,7 +595,6 @@ public class PeerConnectionTest {
     assertTrue(sdpLatch.await());
     assertNull(sdpLatch.getSdp());
 
-    answeringExpectations.expectSetSize();
     answeringExpectations.expectRenegotiationNeeded();
     WeakReference<MediaStream> aLMS = addTracksToPC(
         factory, answeringPC, videoSource, "answeredMediaStream",
@@ -629,8 +656,6 @@ public class PeerConnectionTest {
       // chosen arbitrarily).
       offeringExpectations.expectFramesDelivered(10);
       answeringExpectations.expectFramesDelivered(10);
-      offeringExpectations.expectSetSize();
-      answeringExpectations.expectSetSize();
     }
 
     offeringExpectations.expectStateChange(DataChannel.State.OPEN);

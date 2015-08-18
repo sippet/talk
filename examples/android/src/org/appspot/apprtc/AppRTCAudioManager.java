@@ -151,9 +151,10 @@ public class AppRTCAudioManager {
     audioManager.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL,
         AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
 
-    // The AppRTC demo shall always run in COMMUNICATION mode since it will
-    // result in best possible "VoIP settings", like audio routing, volume
-    // control etc.
+    // Start by setting MODE_IN_COMMUNICATION as default audio mode. It is
+    // required to be in this mode when playout and/or recording starts for
+    // best possible VoIP performance.
+    // TODO(henrika): we migh want to start with RINGTONE mode here instead.
     audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
 
     // Always disable microphone mute during a WebRTC call.

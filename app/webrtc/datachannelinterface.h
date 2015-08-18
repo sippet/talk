@@ -76,7 +76,7 @@ struct DataBuffer {
       : data(text.data(), text.length()),
         binary(false) {
   }
-  size_t size() const { return data.length(); }
+  size_t size() const { return data.size(); }
 
   rtc::Buffer data;
   // Indicates if the received data contains UTF-8 or binary data.
@@ -91,6 +91,8 @@ class DataChannelObserver {
   virtual void OnStateChange() = 0;
   //  A data buffer was successfully received.
   virtual void OnMessage(const DataBuffer& buffer) = 0;
+  // The data channel's buffered_amount has changed.
+  virtual void OnBufferedAmountChange(uint64 previous_amount){};
 
  protected:
   virtual ~DataChannelObserver() {}

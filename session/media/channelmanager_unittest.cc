@@ -28,7 +28,6 @@
 #include "talk/media/base/fakecapturemanager.h"
 #include "talk/media/base/fakemediaengine.h"
 #include "talk/media/base/fakemediaprocessor.h"
-#include "talk/media/base/nullvideorenderer.h"
 #include "talk/media/base/testutils.h"
 #include "talk/media/devices/fakedevicemanager.h"
 #include "webrtc/p2p/base/fakesession.h"
@@ -41,7 +40,6 @@ namespace cricket {
 
 static const AudioCodec kAudioCodecs[] = {
   AudioCodec(97, "voice", 1, 2, 3, 0),
-  AudioCodec(110, "CELT", 32000, 48000, 2, 0),
   AudioCodec(111, "OPUS", 48000, 32000, 2, 0),
 };
 
@@ -127,17 +125,17 @@ TEST_F(ChannelManagerTest, StartupShutdownOnThread) {
 TEST_F(ChannelManagerTest, CreateDestroyChannels) {
   EXPECT_TRUE(cm_->Init());
   cricket::VoiceChannel* voice_channel = cm_->CreateVoiceChannel(
-      session_, cricket::CN_AUDIO, false);
-  EXPECT_TRUE(voice_channel != NULL);
+      session_, cricket::CN_AUDIO, false, AudioOptions());
+  EXPECT_TRUE(voice_channel != nullptr);
   cricket::VideoChannel* video_channel = cm_->CreateVideoChannel(
       session_, cricket::CN_VIDEO, false, VideoOptions(), voice_channel);
-  EXPECT_TRUE(video_channel != NULL);
+  EXPECT_TRUE(video_channel != nullptr);
   cricket::DataChannel* data_channel =
       cm_->CreateDataChannel(session_, cricket::CN_DATA,
                              false, cricket::DCT_RTP);
-  EXPECT_TRUE(data_channel != NULL);
+  EXPECT_TRUE(data_channel != nullptr);
   cm_->DestroyVideoChannel(video_channel);
-  cm_->DestroyVoiceChannel(voice_channel);
+  cm_->DestroyVoiceChannel(voice_channel, nullptr);
   cm_->DestroyDataChannel(data_channel);
   cm_->Terminate();
 }
@@ -150,17 +148,17 @@ TEST_F(ChannelManagerTest, CreateDestroyChannelsOnThread) {
   delete session_;
   session_ = new cricket::FakeSession(&worker_, true);
   cricket::VoiceChannel* voice_channel = cm_->CreateVoiceChannel(
-      session_, cricket::CN_AUDIO, false);
-  EXPECT_TRUE(voice_channel != NULL);
+      session_, cricket::CN_AUDIO, false, AudioOptions());
+  EXPECT_TRUE(voice_channel != nullptr);
   cricket::VideoChannel* video_channel = cm_->CreateVideoChannel(
       session_, cricket::CN_VIDEO, false, VideoOptions(), voice_channel);
-  EXPECT_TRUE(video_channel != NULL);
+  EXPECT_TRUE(video_channel != nullptr);
   cricket::DataChannel* data_channel =
       cm_->CreateDataChannel(session_, cricket::CN_DATA,
                              false, cricket::DCT_RTP);
-  EXPECT_TRUE(data_channel != NULL);
+  EXPECT_TRUE(data_channel != nullptr);
   cm_->DestroyVideoChannel(video_channel);
-  cm_->DestroyVoiceChannel(voice_channel);
+  cm_->DestroyVoiceChannel(voice_channel, nullptr);
   cm_->DestroyDataChannel(data_channel);
   cm_->Terminate();
 }
@@ -173,18 +171,18 @@ TEST_F(ChannelManagerTest, NoTransportChannelTest) {
   // The test is useless unless the session does not fail creating
   // cricket::TransportChannel.
   ASSERT_TRUE(session_->CreateChannel(
-      "audio", "rtp", cricket::ICE_CANDIDATE_COMPONENT_RTP) == NULL);
+                  "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP) == nullptr);
 
   cricket::VoiceChannel* voice_channel = cm_->CreateVoiceChannel(
-      session_, cricket::CN_AUDIO, false);
-  EXPECT_TRUE(voice_channel == NULL);
+      session_, cricket::CN_AUDIO, false, AudioOptions());
+  EXPECT_TRUE(voice_channel == nullptr);
   cricket::VideoChannel* video_channel = cm_->CreateVideoChannel(
       session_, cricket::CN_VIDEO, false, VideoOptions(), voice_channel);
-  EXPECT_TRUE(video_channel == NULL);
+  EXPECT_TRUE(video_channel == nullptr);
   cricket::DataChannel* data_channel =
       cm_->CreateDataChannel(session_, cricket::CN_DATA,
                              false, cricket::DCT_RTP);
-  EXPECT_TRUE(data_channel == NULL);
+  EXPECT_TRUE(data_channel == nullptr);
   cm_->Terminate();
 }
 
@@ -309,25 +307,6 @@ TEST_F(ChannelManagerTest, SetAudioOptions) {
             fme_->audio_delay_offset());
   // Test setting bad values.
   EXPECT_FALSE(cm_->SetAudioOptions("audio-in9", "audio-out2", options));
-}
-
-TEST_F(ChannelManagerTest, SetEngineAudioOptions) {
-  EXPECT_TRUE(cm_->Init());
-  // Test setting specific values.
-  AudioOptions options;
-  options.experimental_ns.Set(true);
-  EXPECT_TRUE(cm_->SetEngineAudioOptions(options));
-  bool experimental_ns = false;
-  EXPECT_TRUE(fme_->audio_options().experimental_ns.Get(&experimental_ns));
-  EXPECT_TRUE(experimental_ns);
-}
-
-TEST_F(ChannelManagerTest, SetEngineAudioOptionsBeforeInitFails) {
-  // Test that values that we set before Init are not applied.
-  AudioOptions options;
-  options.experimental_ns.Set(true);
-  EXPECT_FALSE(cm_->SetEngineAudioOptions(options));
-  EXPECT_FALSE(fme_->audio_options().experimental_ns.IsSet());
 }
 
 TEST_F(ChannelManagerTest, SetCaptureDeviceBeforeInit) {

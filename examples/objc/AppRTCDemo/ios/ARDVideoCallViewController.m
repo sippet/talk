@@ -27,11 +27,16 @@
 
 #import "ARDVideoCallViewController.h"
 
+#import "RTCAVFoundationVideoSource.h"
+#import "RTCLogging.h"
+
 #import "ARDAppClient.h"
 #import "ARDVideoCallView.h"
 
 @interface ARDVideoCallViewController () <ARDAppClientDelegate,
     ARDVideoCallViewDelegate>
+@property(nonatomic, strong) RTCVideoTrack *localVideoTrack;
+@property(nonatomic, strong) RTCVideoTrack *remoteVideoTrack;
 @property(nonatomic, readonly) ARDVideoCallView *videoCallView;
 @end
 
@@ -65,13 +70,13 @@
     didChangeState:(ARDAppClientState)state {
   switch (state) {
     case kARDAppClientStateConnected:
-      NSLog(@"Client connected.");
+      RTCLog(@"Client connected.");
       break;
     case kARDAppClientStateConnecting:
-      NSLog(@"Client connecting.");
+      RTCLog(@"Client connecting.");
       break;
     case kARDAppClientStateDisconnected:
-      NSLog(@"Client disconnected.");
+      RTCLog(@"Client disconnected.");
       [self hangup];
       break;
   }
@@ -79,7 +84,7 @@
 
 - (void)appClient:(ARDAppClient *)client
     didChangeConnectionState:(RTCICEConnectionState)state {
-  NSLog(@"ICE state changed: %d", state);
+  RTCLog(@"ICE state changed: %d", state);
   __weak ARDVideoCallViewController *weakSelf = self;
   dispatch_async(dispatch_get_main_queue(), ^{
     ARDVideoCallViewController *strongSelf = weakSelf;
@@ -90,19 +95,13 @@
 
 - (void)appClient:(ARDAppClient *)client
     didReceiveLocalVideoTrack:(RTCVideoTrack *)localVideoTrack {
-  if (!_localVideoTrack) {
-    _localVideoTrack = localVideoTrack;
-    [_localVideoTrack addRenderer:_videoCallView.localVideoView];
-  }
+  self.localVideoTrack = localVideoTrack;
 }
 
 - (void)appClient:(ARDAppClient *)client
     didReceiveRemoteVideoTrack:(RTCVideoTrack *)remoteVideoTrack {
-  if (!_remoteVideoTrack) {
-    _remoteVideoTrack = remoteVideoTrack;
-    [_remoteVideoTrack addRenderer:_videoCallView.remoteVideoView];
-    _videoCallView.statusLabel.hidden = YES;
-  }
+  self.remoteVideoTrack = remoteVideoTrack;
+  _videoCallView.statusLabel.hidden = YES;
 }
 
 - (void)appClient:(ARDAppClient *)client
@@ -119,22 +118,54 @@
   [self hangup];
 }
 
+- (void)videoCallViewDidSwitchCamera:(ARDVideoCallView *)view {
+  // TODO(tkchin): Rate limit this so you can't tap continously on it.
+  // Probably through an animation.
+  [self switchCamera];
+}
+
 #pragma mark - Private
 
+- (void)setLocalVideoTrack:(RTCVideoTrack *)localVideoTrack {
+  if (_localVideoTrack == localVideoTrack) {
+    return;
+  }
+  [_localVideoTrack removeRenderer:_videoCallView.localVideoView];
+  _localVideoTrack = nil;
+  [_videoCallView.localVideoView renderFrame:nil];
+  _localVideoTrack = localVideoTrack;
+  [_localVideoTrack addRenderer:_videoCallView.localVideoView];
+}
+
+- (void)setRemoteVideoTrack:(RTCVideoTrack *)remoteVideoTrack {
+  if (_remoteVideoTrack == remoteVideoTrack) {
+    return;
+  }
+  [_remoteVideoTrack removeRenderer:_videoCallView.localVideoView];
+  _remoteVideoTrack = nil;
+  [_videoCallView.remoteVideoView renderFrame:nil];
+  _remoteVideoTrack = remoteVideoTrack;
+  [_remoteVideoTrack addRenderer:_videoCallView.remoteVideoView];
+}
+
 - (void)hangup {
-  if (_remoteVideoTrack) {
-    [_remoteVideoTrack removeRenderer:_videoCallView.remoteVideoView];
-    _remoteVideoTrack = nil;
-    [_videoCallView.remoteVideoView renderFrame:nil];
-  }
-  if (_localVideoTrack) {
-    [_localVideoTrack removeRenderer:_videoCallView.localVideoView];
-    _localVideoTrack = nil;
-    [_videoCallView.localVideoView renderFrame:nil];
-  }
+  self.remoteVideoTrack = nil;
+  self.localVideoTrack = nil;
   [_client disconnect];
-  [self.presentingViewController dismissViewControllerAnimated:YES
-                                                    completion:nil];
+  if (![self isBeingDismissed]) {
+    [self.presentingViewController dismissViewControllerAnimated:YES
+                                                      completion:nil];
+  }
+}
+
+- (void)switchCamera {
+  RTCVideoSource* source = self.localVideoTrack.source;
+  if ([source isKindOfClass:[RTCAVFoundationVideoSource class]]) {
+    RTCAVFoundationVideoSource* avSource = (RTCAVFoundationVideoSource*)source;
+    avSource.useBackCamera = !avSource.useBackCamera;
+    _videoCallView.localVideoView.transform = avSource.useBackCamera ?
+        CGAffineTransformIdentity : CGAffineTransformMakeScale(-1, 1);
+  }
 }
 
 - (NSString *)statusTextForState:(RTCICEConnectionState)state {

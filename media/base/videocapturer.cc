@@ -31,9 +31,7 @@
 
 #include <algorithm>
 
-#if !defined(DISABLE_YUV)
 #include "libyuv/scale_argb.h"
-#endif
 #include "talk/media/base/videoframefactory.h"
 #include "talk/media/base/videoprocessor.h"
 #include "webrtc/base/common.h"
@@ -98,6 +96,11 @@ bool CapturedFrame::GetDataSize(uint32* size) const {
   return true;
 }
 
+webrtc::VideoRotation CapturedFrame::GetRotation() const {
+  ASSERT(rotation == 0 || rotation == 90 || rotation == 180 || rotation == 270);
+  return static_cast<webrtc::VideoRotation>(rotation);
+}
+
 /////////////////////////////////////////////////////////////////////
 // Implementation of class VideoCapturer
 /////////////////////////////////////////////////////////////////////
@@ -105,7 +108,8 @@ VideoCapturer::VideoCapturer()
     : thread_(rtc::Thread::Current()),
       adapt_frame_drops_data_(kMaxAccumulatorSize),
       effect_frame_drops_data_(kMaxAccumulatorSize),
-      frame_time_data_(kMaxAccumulatorSize) {
+      frame_time_data_(kMaxAccumulatorSize),
+      apply_rotation_(true) {
   Construct();
 }
 
@@ -113,7 +117,8 @@ VideoCapturer::VideoCapturer(rtc::Thread* thread)
     : thread_(thread),
       adapt_frame_drops_data_(kMaxAccumulatorSize),
       effect_frame_drops_data_(kMaxAccumulatorSize),
-      frame_time_data_(kMaxAccumulatorSize) {
+      frame_time_data_(kMaxAccumulatorSize),
+      apply_rotation_(true) {
   Construct();
 }
 
@@ -249,6 +254,16 @@ bool VideoCapturer::MuteToBlackThenPause(bool muted) {
   return Pause(false);
 }
 
+// Note that the last caller decides whether rotation should be applied if there
+// are multiple send streams using the same camera.
+bool VideoCapturer::SetApplyRotation(bool enable) {
+  apply_rotation_ = enable;
+  if (frame_factory_) {
+    frame_factory_->SetApplyRotation(apply_rotation_);
+  }
+  return true;
+}
+
 void VideoCapturer::SetSupportedFormats(
     const std::vector<VideoFormat>& formats) {
   supported_formats_ = formats;
@@ -335,6 +350,13 @@ std::string VideoCapturer::ToString(const CapturedFrame* captured_frame) const {
   return ss.str();
 }
 
+void VideoCapturer::set_frame_factory(VideoFrameFactory* frame_factory) {
+  frame_factory_.reset(frame_factory);
+  if (frame_factory) {
+    frame_factory->SetApplyRotation(apply_rotation_);
+  }
+}
+
 void VideoCapturer::GetStats(VariableInfo<int>* adapt_drops_stats,
                              VariableInfo<int>* effect_drops_stats,
                              VariableInfo<double>* frame_time_stats,
@@ -363,7 +385,6 @@ void VideoCapturer::OnFrameCaptured(VideoCapturer*,
   if (SignalVideoFrame.is_empty()) {
     return;
   }
-#if !defined(DISABLE_YUV)
 
   // Use a temporary buffer to scale
   rtc::scoped_ptr<uint8[]> scale_buffer;
@@ -483,7 +504,6 @@ void VideoCapturer::OnFrameCaptured(VideoCapturer*,
     modified_frame->data_size = modified_frame_size;
     modified_frame->data = temp_buffer_data;
   }
-#endif  // !DISABLE_YUV
 
   // Size to crop captured frame to.  This adjusts the captured frames
   // aspect ratio to match the final view aspect ratio, considering pixel
@@ -552,7 +572,7 @@ void VideoCapturer::OnFrameCaptured(VideoCapturer*,
     ++effect_frame_drops_;
     return;
   }
-  if (muted_ || (enable_video_adapter_ && video_adapter_.IsBlackOutput())) {
+  if (muted_) {
     // TODO(pthatcher): Use frame_factory_->CreateBlackFrame() instead.
     adapted_frame->SetToBlack();
   }

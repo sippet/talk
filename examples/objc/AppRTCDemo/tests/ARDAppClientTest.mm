@@ -25,15 +25,16 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-
 #import <Foundation/Foundation.h>
 #import <OCMock/OCMock.h>
 
 #import "ARDAppClient+Internal.h"
-#import "ARDRegisterResponse+Internal.h"
+#import "ARDJoinResponse+Internal.h"
 #import "ARDMessageResponse+Internal.h"
+#import "ARDSDPUtils.h"
 #import "RTCMediaConstraints.h"
 #import "RTCPeerConnectionFactory.h"
+#import "RTCSessionDescription.h"
 
 #include "webrtc/base/gunit.h"
 #include "webrtc/base/ssladapter.h"
@@ -136,27 +137,27 @@
   id mockRoomServerClient =
       [OCMockObject mockForProtocol:@protocol(ARDRoomServerClient)];
 
-  // Successful register response.
-  ARDRegisterResponse *registerResponse = [[ARDRegisterResponse alloc] init];
-  registerResponse.result = kARDRegisterResultTypeSuccess;
-  registerResponse.roomId = roomId;
-  registerResponse.clientId = clientId;
-  registerResponse.isInitiator = isInitiator;
-  registerResponse.messages = messages;
+  // Successful join response.
+  ARDJoinResponse *joinResponse = [[ARDJoinResponse alloc] init];
+  joinResponse.result = kARDJoinResultTypeSuccess;
+  joinResponse.roomId = roomId;
+  joinResponse.clientId = clientId;
+  joinResponse.isInitiator = isInitiator;
+  joinResponse.messages = messages;
 
   // Successful message response.
   ARDMessageResponse *messageResponse = [[ARDMessageResponse alloc] init];
   messageResponse.result = kARDMessageResultTypeSuccess;
 
-  // Return register response from above on register.
+  // Return join response from above on join.
   [[[mockRoomServerClient stub] andDo:^(NSInvocation *invocation) {
-    __unsafe_unretained void (^completionHandler)(ARDRegisterResponse *response,
+    __unsafe_unretained void (^completionHandler)(ARDJoinResponse *response,
                                                   NSError *error);
     [invocation getArgument:&completionHandler atIndex:3];
-    completionHandler(registerResponse, nil);
-  }] registerForRoomId:roomId completionHandler:[OCMArg any]];
+    completionHandler(joinResponse, nil);
+  }] joinRoomWithRoomId:roomId completionHandler:[OCMArg any]];
 
-  // Return message response from above on register.
+  // Return message response from above on join.
   [[[mockRoomServerClient stub] andDo:^(NSInvocation *invocation) {
     __unsafe_unretained ARDSignalingMessage *message;
     __unsafe_unretained void (^completionHandler)(ARDMessageResponse *response,
@@ -170,14 +171,14 @@
              clientId:clientId
     completionHandler:[OCMArg any]];
 
-  // Do nothing on deregister.
+  // Do nothing on leave.
   [[[mockRoomServerClient stub] andDo:^(NSInvocation *invocation) {
     __unsafe_unretained void (^completionHandler)(NSError *error);
     [invocation getArgument:&completionHandler atIndex:4];
     if (completionHandler) {
       completionHandler(nil);
     }
-  }] deregisterForRoomId:roomId
+  }] leaveRoomWithRoomId:roomId
                 clientId:clientId
        completionHandler:[OCMArg any]];
 
@@ -305,6 +306,27 @@
 
 @end
 
+@interface ARDSDPUtilsTest : ARDTestCase
+- (void)testPreferVideoCodec;
+@end
+
+@implementation ARDSDPUtilsTest
+
+- (void)testPreferVideoCodec {
+  NSString *sdp = @("m=video 9 RTP/SAVPF 100 116 117 96 120\n"
+                    "a=rtpmap:120 H264/90000\n");
+  NSString *expectedSdp = @("m=video 9 RTP/SAVPF 120 100 116 117 96\n"
+                            "a=rtpmap:120 H264/90000\n");
+  RTCSessionDescription* desc =
+      [[RTCSessionDescription alloc] initWithType:@"offer" sdp:sdp];
+  RTCSessionDescription *h264Desc =
+      [ARDSDPUtils descriptionForDescription:desc
+                         preferredVideoCodec:@"H264"];
+  EXPECT_TRUE([h264Desc.description isEqualToString:expectedSdp]);
+}
+
+@end
+
 class SignalingTest : public ::testing::Test {
  protected:
   static void SetUpTestCase() {
@@ -321,3 +343,12 @@ TEST_F(SignalingTest, SessionTest) {
     [test testSession];
   }
 }
+
+TEST_F(SignalingTest, SDPTest) {
+  @autoreleasepool {
+    ARDSDPUtilsTest *test = [[ARDSDPUtilsTest alloc] init];
+    [test testPreferVideoCodec];
+  }
+}
+
+

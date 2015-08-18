@@ -35,8 +35,9 @@
 
 #include "talk/media/base/videocapturer.h"
 #include "talk/media/webrtc/webrtcvideoframe.h"
-#include "webrtc/base/criticalsection.h"
+#include "webrtc/base/asyncinvoker.h"
 #include "webrtc/base/messagehandler.h"
+#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/common_video/libyuv/include/webrtc_libyuv.h"
 #include "webrtc/modules/video_capture/include/video_capture.h"
 
@@ -72,6 +73,7 @@ class WebRtcVideoCapturer : public VideoCapturer,
   virtual void Stop();
   virtual bool IsRunning();
   virtual bool IsScreencast() const { return false; }
+  virtual bool SetApplyRotation(bool enable);
 
  protected:
   // Override virtual methods of the parent class VideoCapturer.
@@ -80,27 +82,32 @@ class WebRtcVideoCapturer : public VideoCapturer,
  private:
   // Callback when a frame is captured by camera.
   virtual void OnIncomingCapturedFrame(const int32_t id,
-                                       webrtc::I420VideoFrame& frame);
-  virtual void OnIncomingCapturedEncodedFrame(const int32_t id,
-      webrtc::VideoFrame& frame,
-      webrtc::VideoCodecType codec_type) {
-  }
+                                       const webrtc::VideoFrame& frame);
   virtual void OnCaptureDelayChanged(const int32_t id,
                                      const int32_t delay);
+
+  // Used to signal captured frames on the same thread as invoked Start().
+  // With WebRTC's current VideoCapturer implementations, this will mean a
+  // thread hop, but in other implementations (e.g. Chrome) it will be called
+  // directly from OnIncomingCapturedFrame.
+  // TODO(tommi): Remove this workaround when we've updated the WebRTC capturers
+  // to follow the same contract.
+  void SignalFrameCapturedOnStartThread(const webrtc::VideoFrame frame);
 
   rtc::scoped_ptr<WebRtcVcmFactoryInterface> factory_;
   webrtc::VideoCaptureModule* module_;
   int captured_frames_;
   std::vector<uint8_t> capture_buffer_;
+  rtc::Thread* start_thread_;  // Set in Start(), unset in Stop();
 
-  // Critical section to avoid Stop during an OnIncomingCapturedFrame callback.
-  rtc::CriticalSection critical_section_stopping_;
+  rtc::scoped_ptr<rtc::AsyncInvoker> async_invoker_;
 };
 
 struct WebRtcCapturedFrame : public CapturedFrame {
  public:
-  WebRtcCapturedFrame(const webrtc::I420VideoFrame& frame,
-                      void* buffer, size_t length);
+  WebRtcCapturedFrame(const webrtc::VideoFrame& frame,
+                      void* buffer,
+                      size_t length);
 };
 
 }  // namespace cricket

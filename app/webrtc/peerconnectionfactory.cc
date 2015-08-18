@@ -28,6 +28,8 @@
 #include "talk/app/webrtc/peerconnectionfactory.h"
 
 #include "talk/app/webrtc/audiotrack.h"
+#include "talk/app/webrtc/dtlsidentityservice.h"
+#include "talk/app/webrtc/dtlsidentitystore.h"
 #include "talk/app/webrtc/localaudiosource.h"
 #include "talk/app/webrtc/mediastreamproxy.h"
 #include "talk/app/webrtc/mediastreamtrackproxy.h"
@@ -129,7 +131,12 @@ PeerConnectionFactory::PeerConnectionFactory(
 PeerConnectionFactory::~PeerConnectionFactory() {
   DCHECK(signaling_thread_->IsCurrent());
   channel_manager_.reset(NULL);
-  allocator_factory_ = NULL;
+  default_allocator_factory_ = NULL;
+
+  // Make sure |worker_thread_| and |signaling_thread_| outlive
+  // |dtls_identity_store_|.
+  dtls_identity_store_.reset(NULL);
+
   if (owns_ptrs_) {
     if (wraps_current_thread_)
       rtc::ThreadManager::Instance()->UnwrapCurrentThread();
@@ -141,26 +148,31 @@ bool PeerConnectionFactory::Initialize() {
   DCHECK(signaling_thread_->IsCurrent());
   rtc::InitRandom(rtc::Time());
 
-  allocator_factory_ = PortAllocatorFactory::Create(worker_thread_);
-  if (!allocator_factory_)
+  default_allocator_factory_ = PortAllocatorFactory::Create(worker_thread_);
+  if (!default_allocator_factory_)
     return false;
 
   cricket::DummyDeviceManager* device_manager(
       new cricket::DummyDeviceManager());
+
   // TODO:  Need to make sure only one VoE is created inside
   // WebRtcMediaEngine.
-  cricket::MediaEngineInterface* media_engine(
-      cricket::WebRtcMediaEngineFactory::Create(default_adm_.get(),
-                                                NULL,  // No secondary adm.
-                                                video_encoder_factory_.get(),
-                                                video_decoder_factory_.get()));
+  cricket::MediaEngineInterface* media_engine =
+      worker_thread_->Invoke<cricket::MediaEngineInterface*>(rtc::Bind(
+      &PeerConnectionFactory::CreateMediaEngine_w, this));
 
   channel_manager_.reset(new cricket::ChannelManager(
       media_engine, device_manager, worker_thread_));
+
   channel_manager_->SetVideoRtxEnabled(true);
   if (!channel_manager_->Init()) {
     return false;
   }
+
+  dtls_identity_store_.reset(
+      new DtlsIdentityStore(signaling_thread_, worker_thread_));
+  dtls_identity_store_->Initialize();
+
   return true;
 }
 
@@ -196,13 +208,22 @@ PeerConnectionFactory::CreatePeerConnection(
     DTLSIdentityServiceInterface* dtls_identity_service,
     PeerConnectionObserver* observer) {
   DCHECK(signaling_thread_->IsCurrent());
-  DCHECK(allocator_factory || allocator_factory_);
+  DCHECK(allocator_factory || default_allocator_factory_);
+
+  if (!dtls_identity_service) {
+    dtls_identity_service = new DtlsIdentityService(dtls_identity_store_.get());
+  }
+
+  PortAllocatorFactoryInterface* chosen_allocator_factory =
+      allocator_factory ? allocator_factory : default_allocator_factory_.get();
+  chosen_allocator_factory->SetNetworkIgnoreMask(options_.network_ignore_mask);
+
   rtc::scoped_refptr<PeerConnection> pc(
       new rtc::RefCountedObject<PeerConnection>(this));
   if (!pc->Initialize(
       configuration,
       constraints,
-      allocator_factory ? allocator_factory : allocator_factory_.get(),
+      chosen_allocator_factory,
       dtls_identity_service,
       observer)) {
     return NULL;
@@ -250,6 +271,13 @@ rtc::Thread* PeerConnectionFactory::signaling_thread() {
 rtc::Thread* PeerConnectionFactory::worker_thread() {
   DCHECK(signaling_thread_->IsCurrent());
   return worker_thread_;
+}
+
+cricket::MediaEngineInterface* PeerConnectionFactory::CreateMediaEngine_w() {
+  ASSERT(worker_thread_ == rtc::Thread::Current());
+  return cricket::WebRtcMediaEngineFactory::Create(
+      default_adm_.get(), video_encoder_factory_.get(),
+      video_decoder_factory_.get());
 }
 
 }  // namespace webrtc

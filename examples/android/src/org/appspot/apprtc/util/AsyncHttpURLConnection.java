@@ -36,14 +36,16 @@ import java.net.URL;
 import java.util.Scanner;
 
 /**
- * Asynchronious http requests implementation.
+ * Asynchronous http requests implementation.
  */
 public class AsyncHttpURLConnection {
-  private static final int HTTP_TIMEOUT_MS = 5000;
+  private static final int HTTP_TIMEOUT_MS = 8000;
+  private static final String HTTP_ORIGIN = "https://apprtc.appspot.com";
   private final String method;
   private final String url;
   private final String message;
   private final AsyncHttpEvents events;
+  private String contentType;
 
   /**
    * Http requests callbacks.
@@ -59,6 +61,10 @@ public class AsyncHttpURLConnection {
     this.url = url;
     this.message = message;
     this.events = events;
+  }
+
+  public void setContentType(String contentType) {
+    this.contentType = contentType;
   }
 
   public void send() {
@@ -83,14 +89,19 @@ public class AsyncHttpURLConnection {
       connection.setDoInput(true);
       connection.setConnectTimeout(HTTP_TIMEOUT_MS);
       connection.setReadTimeout(HTTP_TIMEOUT_MS);
+      // TODO(glaznev) - query request origin from pref_room_server_url_key preferences.
+      connection.addRequestProperty("origin", HTTP_ORIGIN);
       boolean doOutput = false;
       if (method.equals("POST")) {
         doOutput = true;
         connection.setDoOutput(true);
         connection.setFixedLengthStreamingMode(postData.length);
       }
-      connection.setRequestProperty(
-          "content-type", "text/plain; charset=utf-8");
+      if (contentType == null) {
+        connection.setRequestProperty("Content-Type", "text/plain; charset=utf-8");
+      } else {
+        connection.setRequestProperty("Content-Type", contentType);
+      }
 
       // Send POST request.
       if (doOutput && postData.length > 0) {
@@ -104,11 +115,13 @@ public class AsyncHttpURLConnection {
       if (responseCode != 200) {
         events.onHttpError("Non-200 response to " + method + " to URL: "
             + url + " : " + connection.getHeaderField(null));
+        connection.disconnect();
         return;
       }
       InputStream responseStream = connection.getInputStream();
       String response = drainStream(responseStream);
       responseStream.close();
+      connection.disconnect();
       events.onHttpComplete(response);
     } catch (SocketTimeoutException e) {
       events.onHttpError("HTTP " + method + " to " + url + " timeout");

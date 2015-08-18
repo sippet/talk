@@ -82,14 +82,12 @@ public class WebSocketChannelClient {
    * All events are dispatched from a looper executor thread.
    */
   public interface WebSocketChannelEvents {
-    public void onWebSocketOpen();
     public void onWebSocketMessage(final String message);
     public void onWebSocketClose();
     public void onWebSocketError(final String description);
   }
 
-  public WebSocketChannelClient(LooperExecutor executor,
-      WebSocketChannelEvents events) {
+  public WebSocketChannelClient(LooperExecutor executor, WebSocketChannelEvents events) {
     this.executor = executor;
     this.events = events;
     roomID = null;
@@ -102,8 +100,7 @@ public class WebSocketChannelClient {
     return state;
   }
 
-  public void connect(final String wsUrl, final String postUrl,
-      final String roomID, final String clientID) {
+  public void connect(final String wsUrl, final String postUrl) {
     checkIfCalledOnValidThread();
     if (state != WebSocketConnectionState.NEW) {
       Log.e(TAG, "WebSocket is already connected.");
@@ -111,8 +108,6 @@ public class WebSocketChannelClient {
     }
     wsServerUrl = wsUrl;
     postServerUrl = postUrl;
-    this.roomID = roomID;
-    this.clientID = clientID;
     closeEvent = false;
 
     Log.d(TAG, "Connecting WebSocket to: " + wsUrl + ". Post URL: " + postUrl);
@@ -127,12 +122,15 @@ public class WebSocketChannelClient {
     }
   }
 
-  public void register() {
+  public void register(final String roomID, final String clientID) {
     checkIfCalledOnValidThread();
+    this.roomID = roomID;
+    this.clientID = clientID;
     if (state != WebSocketConnectionState.CONNECTED) {
       Log.w(TAG, "WebSocket register() in state " + state);
       return;
     }
+    Log.d(TAG, "Registering WebSocket for room " + roomID + ". CLientID: " + clientID);
     JSONObject json = new JSONObject();
     try {
       json.put("cmd", "register");
@@ -192,17 +190,16 @@ public class WebSocketChannelClient {
     checkIfCalledOnValidThread();
     Log.d(TAG, "Disonnect WebSocket. State: " + state);
     if (state == WebSocketConnectionState.REGISTERED) {
+      // Send "bye" to WebSocket server.
       send("{\"type\": \"bye\"}");
       state = WebSocketConnectionState.CONNECTED;
+      // Send http DELETE to http WebSocket server.
+      sendWSSMessage("DELETE", "");
     }
     // Close WebSocket in CONNECTED or ERROR states only.
     if (state == WebSocketConnectionState.CONNECTED
         || state == WebSocketConnectionState.ERROR) {
       ws.disconnect();
-
-      // Send DELETE to http WebSocket server.
-      sendWSSMessage("DELETE", "");
-
       state = WebSocketConnectionState.CLOSED;
 
       // Wait for websocket close event to prevent websocket library from
@@ -271,7 +268,10 @@ public class WebSocketChannelClient {
         @Override
         public void run() {
           state = WebSocketConnectionState.CONNECTED;
-          events.onWebSocketOpen();
+          // Check if we have pending register request.
+          if (roomID != null && clientID != null) {
+            register(roomID, clientID);
+          }
         }
       });
     }

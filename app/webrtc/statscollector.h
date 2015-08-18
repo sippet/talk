@@ -52,6 +52,9 @@ const char* IceCandidateTypeToStatsType(const std::string& candidate_type);
 // only used by stats collector.
 const char* AdapterTypeToStatsType(rtc::AdapterType type);
 
+// A mapping between track ids and their StatsReport.
+typedef std::map<std::string, StatsReport*> TrackIdMap;
+
 class StatsCollector {
  public:
   // The caller is responsible for ensuring that the session outlives the
@@ -87,7 +90,7 @@ class StatsCollector {
   // Prepare a local or remote SSRC report for the given ssrc. Used internally
   // in the ExtractStatsFromList template.
   StatsReport* PrepareReport(bool local, uint32 ssrc,
-      const std::string& transport_id, StatsReport::Direction direction);
+      const StatsReport::Id& transport_id, StatsReport::Direction direction);
 
   // Method used by the unittest to force a update of stats since UpdateStats()
   // that occur less than kMinGatherStatsPeriod number of ms apart will be
@@ -97,29 +100,34 @@ class StatsCollector {
  private:
   friend class StatsCollectorTest;
 
+  // Overridden in unit tests to fake timing.
+  virtual double GetTimeNow();
+
   bool CopySelectedReports(const std::string& selector, StatsReports* reports);
 
   // Helper method for AddCertificateReports.
-  std::string AddOneCertificateReport(
-      const rtc::SSLCertificate* cert, const std::string& issuer_id);
+  StatsReport* AddOneCertificateReport(
+      const rtc::SSLCertificate* cert, const StatsReport* issuer);
 
   // Helper method for creating IceCandidate report. |is_local| indicates
   // whether this candidate is local or remote.
-  std::string AddCandidateReport(const cricket::Candidate& candidate,
-                                 bool local);
+  StatsReport* AddCandidateReport(const cricket::Candidate& candidate,
+                                  bool local);
 
   // Adds a report for this certificate and every certificate in its chain, and
-  // returns the leaf certificate's report's ID.
-  std::string AddCertificateReports(const rtc::SSLCertificate* cert);
+  // returns the leaf certificate's report.
+  StatsReport* AddCertificateReports(const rtc::SSLCertificate* cert);
+
+  StatsReport* AddConnectionInfoReport(const std::string& content_name,
+      int component, int connection_id,
+      const StatsReport::Id& channel_report_id,
+      const cricket::ConnectionInfo& info);
 
   void ExtractDataInfo();
   void ExtractSessionInfo();
   void ExtractVoiceInfo();
   void ExtractVideoInfo(PeerConnectionInterface::StatsOutputLevel level);
   void BuildSsrcToTransportId();
-  webrtc::StatsReport* GetOrCreateReport(const StatsReport::StatsType& type,
-                                         const std::string& id,
-                                         StatsReport::Direction direction);
   webrtc::StatsReport* GetReport(const StatsReport::StatsType& type,
                                  const std::string& id,
                                  StatsReport::Direction direction);
@@ -134,13 +142,19 @@ class StatsCollector {
   bool GetTrackIdBySsrc(uint32 ssrc, std::string* track_id,
                         StatsReport::Direction direction);
 
+  // Helper method to update the timestamp of track records.
+  void UpdateTrackReports();
+
   // A collection for all of our stats reports.
   StatsCollection reports_;
+  TrackIdMap track_ids_;
   // Raw pointer to the session the statistics are gathered from.
   WebRtcSession* const session_;
   double stats_gathering_started_;
   cricket::ProxyTransportMap proxy_to_transport_;
 
+  // TODO(tommi): We appear to be holding on to raw pointers to reference
+  // counted objects?  We should be using scoped_refptr here.
   typedef std::vector<std::pair<AudioTrackInterface*, uint32> >
       LocalAudioTrackVector;
   LocalAudioTrackVector local_audio_tracks_;

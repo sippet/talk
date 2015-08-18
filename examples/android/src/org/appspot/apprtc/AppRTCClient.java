@@ -28,7 +28,6 @@
 package org.appspot.apprtc;
 
 import org.webrtc.IceCandidate;
-import org.webrtc.MediaConstraints;
 import org.webrtc.PeerConnection;
 import org.webrtc.SessionDescription;
 
@@ -38,12 +37,28 @@ import java.util.List;
  * AppRTCClient is the interface representing an AppRTC client.
  */
 public interface AppRTCClient {
+
   /**
-   * Asynchronously connect to an AppRTC room URL, e.g.
-   * https://apprtc.appspot.com/?r=NNN. Once connection is established
-   * onConnectedToRoom() callback with room parameters is invoked.
+   * Struct holding the connection parameters of an AppRTC room.
    */
-  public void connectToRoom(final String url, final boolean loopback);
+  public static class RoomConnectionParameters {
+    public final String roomUrl;
+    public final String roomId;
+    public final boolean loopback;
+    public RoomConnectionParameters(
+        String roomUrl, String roomId, boolean loopback) {
+      this.roomUrl = roomUrl;
+      this.roomId = roomId;
+      this.loopback = loopback;
+    }
+  }
+
+  /**
+   * Asynchronously connect to an AppRTC room URL using supplied connection
+   * parameters. Once connection is established onConnectedToRoom()
+   * callback with room parameters is invoked.
+   */
+  public void connectToRoom(RoomConnectionParameters connectionParameters);
 
   /**
    * Send offer SDP to the other participant.
@@ -68,14 +83,9 @@ public interface AppRTCClient {
   /**
    * Struct holding the signaling parameters of an AppRTC room.
    */
-  public class SignalingParameters {
+  public static class SignalingParameters {
     public final List<PeerConnection.IceServer> iceServers;
     public final boolean initiator;
-    public final MediaConstraints pcConstraints;
-    public final MediaConstraints videoConstraints;
-    public final MediaConstraints audioConstraints;
-    public final String roomUrl;
-    public final String roomId;
     public final String clientId;
     public final String wssUrl;
     public final String wssPostUrl;
@@ -84,18 +94,11 @@ public interface AppRTCClient {
 
     public SignalingParameters(
         List<PeerConnection.IceServer> iceServers,
-        boolean initiator, MediaConstraints pcConstraints,
-        MediaConstraints videoConstraints, MediaConstraints audioConstraints,
-        String roomUrl, String roomId, String clientId,
+        boolean initiator, String clientId,
         String wssUrl, String wssPostUrl,
         SessionDescription offerSdp, List<IceCandidate> iceCandidates) {
       this.iceServers = iceServers;
       this.initiator = initiator;
-      this.pcConstraints = pcConstraints;
-      this.videoConstraints = videoConstraints;
-      this.audioConstraints = audioConstraints;
-      this.roomUrl = roomUrl;
-      this.roomId = roomId;
       this.clientId = clientId;
       this.wssUrl = wssUrl;
       this.wssPostUrl = wssPostUrl;

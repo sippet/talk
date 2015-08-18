@@ -27,8 +27,10 @@
 
 #import "ARDWebSocketChannel.h"
 
-#import "ARDUtilities.h"
+#import "RTCLogging.h"
 #import "SRWebSocket.h"
+
+#import "ARDUtilities.h"
 
 // TODO(tkchin): move these to a configuration object.
 static NSString const *kARDWSSMessageErrorKey = @"error";
@@ -57,7 +59,7 @@ static NSString const *kARDWSSMessagePayloadKey = @"msg";
     _delegate = delegate;
     _socket = [[SRWebSocket alloc] initWithURL:url];
     _socket.delegate = self;
-    NSLog(@"Opening WebSocket.");
+    RTCLog(@"Opening WebSocket.");
     [_socket open];
   }
   return self;
@@ -104,12 +106,12 @@ static NSString const *kARDWSSMessagePayloadKey = @"msg";
     NSString *messageString =
         [[NSString alloc] initWithData:messageJSONObject
                               encoding:NSUTF8StringEncoding];
-    NSLog(@"C->WSS: %@", messageString);
+    RTCLog(@"C->WSS: %@", messageString);
     [_socket send:messageString];
   } else {
     NSString *dataString =
         [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    NSLog(@"C->WSS POST: %@", dataString);
+    RTCLog(@"C->WSS POST: %@", dataString);
     NSString *urlString =
         [NSString stringWithFormat:@"%@/%@/%@",
             [_restURL absoluteString], _roomId, _clientId];
@@ -126,7 +128,7 @@ static NSString const *kARDWSSMessagePayloadKey = @"msg";
     return;
   }
   [_socket close];
-  NSLog(@"C->WSS DELETE rid:%@ cid:%@", _roomId, _clientId);
+  RTCLog(@"C->WSS DELETE rid:%@ cid:%@", _roomId, _clientId);
   NSString *urlString =
       [NSString stringWithFormat:@"%@/%@/%@",
           [_restURL absoluteString], _roomId, _clientId];
@@ -140,7 +142,7 @@ static NSString const *kARDWSSMessagePayloadKey = @"msg";
 #pragma mark - SRWebSocketDelegate
 
 - (void)webSocketDidOpen:(SRWebSocket *)webSocket {
-  NSLog(@"WebSocket connection opened.");
+  RTCLog(@"WebSocket connection opened.");
   self.state = kARDSignalingChannelStateOpen;
   if (_roomId.length && _clientId.length) {
     [self registerWithCollider];
@@ -154,24 +156,24 @@ static NSString const *kARDWSSMessagePayloadKey = @"msg";
                                                   options:0
                                                     error:nil];
   if (![jsonObject isKindOfClass:[NSDictionary class]]) {
-    NSLog(@"Unexpected message: %@", jsonObject);
+    RTCLogError(@"Unexpected message: %@", jsonObject);
     return;
   }
   NSDictionary *wssMessage = jsonObject;
   NSString *errorString = wssMessage[kARDWSSMessageErrorKey];
   if (errorString.length) {
-    NSLog(@"WSS error: %@", errorString);
+    RTCLogError(@"WSS error: %@", errorString);
     return;
   }
   NSString *payload = wssMessage[kARDWSSMessagePayloadKey];
   ARDSignalingMessage *signalingMessage =
       [ARDSignalingMessage messageFromJSONString:payload];
-  NSLog(@"WSS->C: %@", payload);
+  RTCLog(@"WSS->C: %@", payload);
   [_delegate channel:self didReceiveMessage:signalingMessage];
 }
 
 - (void)webSocket:(SRWebSocket *)webSocket didFailWithError:(NSError *)error {
-  NSLog(@"WebSocket error: %@", error);
+  RTCLogError(@"WebSocket error: %@", error);
   self.state = kARDSignalingChannelStateError;
 }
 
@@ -179,7 +181,7 @@ static NSString const *kARDWSSMessagePayloadKey = @"msg";
     didCloseWithCode:(NSInteger)code
               reason:(NSString *)reason
             wasClean:(BOOL)wasClean {
-  NSLog(@"WebSocket closed with code: %ld reason:%@ wasClean:%d",
+  RTCLog(@"WebSocket closed with code: %ld reason:%@ wasClean:%d",
       (long)code, reason, wasClean);
   NSParameterAssert(_state != kARDSignalingChannelStateError);
   self.state = kARDSignalingChannelStateClosed;
@@ -204,7 +206,7 @@ static NSString const *kARDWSSMessagePayloadKey = @"msg";
                                         error:nil];
   NSString *messageString =
       [[NSString alloc] initWithData:message encoding:NSUTF8StringEncoding];
-  NSLog(@"Registering on WSS for rid:%@ cid:%@", _roomId, _clientId);
+  RTCLog(@"Registering on WSS for rid:%@ cid:%@", _roomId, _clientId);
   // Registration can fail if server rejects it. For example, if the room is
   // full.
   [_socket send:messageString];
