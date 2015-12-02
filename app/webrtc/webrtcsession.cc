@@ -870,8 +870,7 @@ bool WebRtcSession::SetRemoteDescription(SessionDescriptionInterface* desc,
     SetIceConnectionState(PeerConnectionInterface::kIceConnectionChecking);
   }
 
-  if (compatibility_mode_
-      && desc->type() == SessionDescriptionInterface::kAnswer) {
+  if (compatibility_mode_) {
     bool has_candidates = false;
     for (size_t m = 0; m < desc->number_of_mediasections(); ++m) {
       const IceCandidateCollection* candidates = desc->candidates(m);
