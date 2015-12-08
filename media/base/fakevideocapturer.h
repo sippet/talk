@@ -114,7 +114,6 @@ class FakeVideoCapturer : public cricket::VideoCapturer {
     frame.height = height;
     frame.fourcc = fourcc;
     frame.data_size = size;
-    frame.elapsed_time = next_timestamp_;
     frame.time_stamp = initial_unix_timestamp_ + next_timestamp_;
     next_timestamp_ += timestamp_interval;
 
@@ -131,6 +130,10 @@ class FakeVideoCapturer : public cricket::VideoCapturer {
     // capture results from downstream.
     SignalFrameCaptured(this, &frame);
     return true;
+  }
+
+  void SignalCapturedFrame(cricket::CapturedFrame* frame) {
+    SignalFrameCaptured(this, frame);
   }
 
   sigslot::signal1<FakeVideoCapturer*> SignalDestroyed;

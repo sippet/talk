@@ -29,12 +29,17 @@ package org.webrtc;
 import android.hardware.Camera;
 import android.test.ActivityTestCase;
 import android.test.suitebuilder.annotation.SmallTest;
+import android.test.suitebuilder.annotation.MediumTest;
+import android.util.Size;
 
-import org.webrtc.VideoCapturerAndroid.CaptureFormat;
+import org.webrtc.CameraEnumerationAndroid.CaptureFormat;
 import org.webrtc.VideoRenderer.I420Frame;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 
 @SuppressWarnings("deprecation")
 public class VideoCapturerAndroidTest extends ActivityTestCase {
@@ -48,18 +53,35 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
         ++framesRendered;
         frameLock.notify();
       }
-    }
-
-    // TODO(guoweis): Remove this once chrome code base is updated.
-    @Override
-    public boolean canApplyRotation() {
-      return false;
+      VideoRenderer.renderFrameDone(frame);
     }
 
     public int WaitForNextFrameToRender() throws InterruptedException {
       synchronized (frameLock) {
         frameLock.wait();
         return framesRendered;
+      }
+    }
+  }
+
+  static class FakeAsyncRenderer implements VideoRenderer.Callbacks {
+    private final List<I420Frame> pendingFrames = new ArrayList<I420Frame>();
+
+    @Override
+    public void renderFrame(I420Frame frame) {
+      synchronized (pendingFrames) {
+        pendingFrames.add(frame);
+        pendingFrames.notifyAll();
+      }
+    }
+
+    // Wait until at least one frame have been received, before returning them.
+    public List<I420Frame> waitForPendingFrames() throws InterruptedException {
+      synchronized (pendingFrames) {
+        while (pendingFrames.isEmpty()) {
+          pendingFrames.wait();
+        }
+        return new ArrayList<I420Frame>(pendingFrames);
       }
     }
   }
@@ -130,7 +152,7 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
     return (Camera.getNumberOfCameras() >= 2);
   }
 
-  void starCapturerAndRender(String deviceName) throws InterruptedException {
+  void startCapturerAndRender(String deviceName) throws InterruptedException {
     PeerConnectionFactory factory = new PeerConnectionFactory();
     VideoCapturerAndroid capturer =
         VideoCapturerAndroid.create(deviceName, null);
@@ -143,13 +165,44 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
     track.dispose();
     source.dispose();
     factory.dispose();
+    assertTrue(capturer.isReleased());
   }
 
   @Override
   protected void setUp() {
     assertTrue(PeerConnectionFactory.initializeAndroidGlobals(
-        getInstrumentation().getContext(), true,
-        true, true, null));
+        getInstrumentation().getContext(), true, true, true));
+  }
+
+  @SmallTest
+  // Test that enumerating formats using android.hardware.camera2 will give the same formats as
+  // android.hardware.camera in the range 320x240 to 1280x720. Often the camera2 API may contain
+  // some high resolutions that are not supported in camera1, but it may also be the other way
+  // around in some cases. Supported framerates may also differ, so don't compare those.
+  public void testCamera2Enumerator() {
+    if (!Camera2Enumerator.isSupported()) {
+      return;
+    }
+    final CameraEnumerationAndroid.Enumerator camera1Enumerator = new CameraEnumerator();
+    final CameraEnumerationAndroid.Enumerator camera2Enumerator =
+        new Camera2Enumerator(getInstrumentation().getContext());
+
+    for (int i = 0; i < CameraEnumerationAndroid.getDeviceCount(); ++i) {
+      final Set<Size> resolutions1 = new HashSet<Size>();
+      for (CaptureFormat format : camera1Enumerator.getSupportedFormats(i)) {
+        resolutions1.add(new Size(format.width, format.height));
+      }
+      final Set<Size> resolutions2 = new HashSet<Size>();
+      for (CaptureFormat format : camera2Enumerator.getSupportedFormats(i)) {
+        resolutions2.add(new Size(format.width, format.height));
+      }
+      for (Size size : resolutions1) {
+        if (size.getWidth() >= 320 && size.getHeight() >= 240
+            && size.getWidth() <= 1280 && size.getHeight() <= 720) {
+          assertTrue(resolutions2.contains(size));
+        }
+      }
+    }
   }
 
   @SmallTest
@@ -157,12 +210,13 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
     VideoCapturerAndroid capturer = VideoCapturerAndroid.create("", null);
     assertNotNull(capturer);
     capturer.dispose();
+    assertTrue(capturer.isReleased());
   }
 
   @SmallTest
-  public void testCreateNoneExistingCamera() throws Exception {
+  public void testCreateNonExistingCamera() throws Exception {
     VideoCapturerAndroid capturer = VideoCapturerAndroid.create(
-        "none existing camera", null);
+        "non-existing camera", null);
     assertNull(capturer);
   }
 
@@ -171,7 +225,7 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
   // to a Java video renderer using a "default" capturer.
   // It tests both the Java and the C++ layer.
   public void testStartVideoCapturer() throws Exception {
-    starCapturerAndRender("");
+    startCapturerAndRender("");
   }
 
   @SmallTest
@@ -179,7 +233,7 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
   // to a Java video renderer using the front facing video capturer.
   // It tests both the Java and the C++ layer.
   public void testStartFrontFacingVideoCapturer() throws Exception {
-    starCapturerAndRender(VideoCapturerAndroid.getNameOfFrontFacingDevice());
+    startCapturerAndRender(CameraEnumerationAndroid.getNameOfFrontFacingDevice());
   }
 
   @SmallTest
@@ -190,11 +244,11 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
     if (!HaveTwoCameras()) {
       return;
     }
-    starCapturerAndRender(VideoCapturerAndroid.getNameOfBackFacingDevice());
+    startCapturerAndRender(CameraEnumerationAndroid.getNameOfBackFacingDevice());
   }
 
   @SmallTest
-  // This test that the default camera can be started and but the camera can
+  // This test that the default camera can be started and that the camera can
   // later be switched to another camera.
   // It tests both the Java and the C++ layer.
   public void testSwitchVideoCapturer() throws Exception {
@@ -204,14 +258,30 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
         factory.createVideoSource(capturer, new MediaConstraints());
     VideoTrack track = factory.createVideoTrack("dummy", source);
 
-    if (HaveTwoCameras())
-      assertTrue(capturer.switchCamera(null));
-    else
-      assertFalse(capturer.switchCamera(null));
+    // Array with one element to avoid final problem in nested classes.
+    final boolean[] cameraSwitchSuccessful = new boolean[1];
+    final CountDownLatch barrier = new CountDownLatch(1);
+    capturer.switchCamera(new VideoCapturerAndroid.CameraSwitchHandler() {
+      @Override
+      public void onCameraSwitchDone(boolean isFrontCamera) {
+        cameraSwitchSuccessful[0] = true;
+        barrier.countDown();
+      }
+      @Override
+      public void onCameraSwitchError(String errorDescription) {
+        cameraSwitchSuccessful[0] = false;
+        barrier.countDown();
+      }
+    });
+    // Wait until the camera has been switched.
+    barrier.await();
 
-    // Wait until the camera have been switched.
-    capturer.runCameraThreadUntilIdle();
-
+    // Check result.
+    if (HaveTwoCameras()) {
+      assertTrue(cameraSwitchSuccessful[0]);
+    } else {
+      assertFalse(cameraSwitchSuccessful[0]);
+    }
     // Ensure that frames are received.
     RendererCallbacks callbacks = new RendererCallbacks();
     track.addRenderer(new VideoRenderer(callbacks));
@@ -219,6 +289,33 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
     track.dispose();
     source.dispose();
     factory.dispose();
+    assertTrue(capturer.isReleased());
+  }
+
+  @MediumTest
+  // Test what happens when attempting to call e.g. switchCamera() after camera has been stopped.
+  public void testCameraCallsAfterStop() throws InterruptedException {
+    final String deviceName = CameraEnumerationAndroid.getDeviceName(0);
+    final VideoCapturerAndroid capturer = VideoCapturerAndroid.create(deviceName, null);
+    final List<CaptureFormat> formats = CameraEnumerationAndroid.getSupportedFormats(0);
+    final CameraEnumerationAndroid.CaptureFormat format = formats.get(0);
+
+    final FakeCapturerObserver observer = new FakeCapturerObserver();
+    capturer.startCapture(format.width, format.height, format.maxFramerate,
+        getInstrumentation().getContext(), observer);
+    // Make sure camera is started and then stop it.
+    assertTrue(observer.WaitForCapturerToStart());
+    capturer.stopCapture();
+    for (long timeStamp : observer.getCopyAndResetListOftimeStamps()) {
+      capturer.returnBuffer(timeStamp);
+    }
+    // We can't change |capturer| at this point, but we should not crash.
+    capturer.switchCamera(null);
+    capturer.onOutputFormatRequest(640, 480, 15);
+    capturer.changeCaptureFormat(640, 480, 15);
+
+    capturer.dispose();
+    assertTrue(capturer.isReleased());
   }
 
   @SmallTest
@@ -244,6 +341,7 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
     track.dispose();
     source.dispose();
     factory.dispose();
+    assertTrue(capturer.isReleased());
   }
 
   @SmallTest
@@ -252,14 +350,13 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
   public void testStartStopWithDifferentResolutions() throws Exception {
     FakeCapturerObserver observer = new FakeCapturerObserver();
 
-    String deviceName = VideoCapturerAndroid.getDeviceName(0);
-    ArrayList<CaptureFormat> formats =
-        VideoCapturerAndroid.getSupportedFormats(0);
+    String deviceName = CameraEnumerationAndroid.getDeviceName(0);
+    List<CaptureFormat> formats = CameraEnumerationAndroid.getSupportedFormats(0);
     VideoCapturerAndroid capturer =
         VideoCapturerAndroid.create(deviceName, null);
 
     for(int i = 0; i < 3 ; ++i) {
-      VideoCapturerAndroid.CaptureFormat format = formats.get(i);
+      CameraEnumerationAndroid.CaptureFormat format = formats.get(i);
       capturer.startCapture(format.width, format.height, format.maxFramerate,
           getInstrumentation().getContext(), observer);
       assertTrue(observer.WaitForCapturerToStart());
@@ -267,8 +364,12 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
       // Check the frame size.
       assertEquals(format.frameSize(), observer.frameSize());
       capturer.stopCapture();
+      for (long timestamp : observer.getCopyAndResetListOftimeStamps()) {
+        capturer.returnBuffer(timestamp);
+      }
     }
     capturer.dispose();
+    assertTrue(capturer.isReleased());
   }
 
   @SmallTest
@@ -277,13 +378,12 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
   public void testReturnBufferLate() throws Exception {
     FakeCapturerObserver observer = new FakeCapturerObserver();
 
-    String deviceName = VideoCapturerAndroid.getDeviceName(0);
-    ArrayList<CaptureFormat> formats =
-        VideoCapturerAndroid.getSupportedFormats(0);
+    String deviceName = CameraEnumerationAndroid.getDeviceName(0);
+    List<CaptureFormat> formats = CameraEnumerationAndroid.getSupportedFormats(0);
     VideoCapturerAndroid capturer =
         VideoCapturerAndroid.create(deviceName, null);
 
-    VideoCapturerAndroid.CaptureFormat format = formats.get(0);
+    CameraEnumerationAndroid.CaptureFormat format = formats.get(0);
     capturer.startCapture(format.width, format.height, format.maxFramerate,
         getInstrumentation().getContext(), observer);
     assertTrue(observer.WaitForCapturerToStart());
@@ -311,5 +411,48 @@ public class VideoCapturerAndroidTest extends ActivityTestCase {
     for (Long timeStamp : listOftimestamps) {
       capturer.returnBuffer(timeStamp);
     }
+    capturer.dispose();
+    assertTrue(capturer.isReleased());
+  }
+
+  @MediumTest
+  // This test that we can capture frames, keep the frames in a local renderer, stop capturing,
+  // and then return the frames. The difference between the test testReturnBufferLate() is that we
+  // also test the JNI and C++ AndroidVideoCapturer parts.
+  public void testReturnBufferLateEndToEnd() throws InterruptedException {
+    final VideoCapturerAndroid capturer = VideoCapturerAndroid.create("", null);
+    final PeerConnectionFactory factory = new PeerConnectionFactory();
+    final VideoSource source = factory.createVideoSource(capturer, new MediaConstraints());
+    final VideoTrack track = factory.createVideoTrack("dummy", source);
+    final FakeAsyncRenderer renderer = new FakeAsyncRenderer();
+    track.addRenderer(new VideoRenderer(renderer));
+    // Wait for at least one frame that has not been returned.
+    assertFalse(renderer.waitForPendingFrames().isEmpty());
+
+    capturer.stopCapture();
+
+    // Dispose everything.
+    track.dispose();
+    source.dispose();
+    factory.dispose();
+
+    // The pending frames should keep the JNI parts and |capturer| alive.
+    assertFalse(capturer.isReleased());
+
+    // Return the frame(s), on a different thread out of spite.
+    final List<I420Frame> pendingFrames = renderer.waitForPendingFrames();
+    final Thread returnThread = new Thread(new Runnable() {
+      @Override
+      public void run() {
+        for (I420Frame frame : pendingFrames) {
+          VideoRenderer.renderFrameDone(frame);
+        }
+      }
+    });
+    returnThread.start();
+    returnThread.join();
+
+    // Check that frames have successfully returned. This will cause |capturer| to be released.
+    assertTrue(capturer.isReleased());
   }
 }

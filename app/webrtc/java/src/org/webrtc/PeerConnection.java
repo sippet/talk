@@ -124,10 +124,21 @@ public class PeerConnection {
   public enum RtcpMuxPolicy {
     NEGOTIATE, REQUIRE
   };
+
   /** Java version of PeerConnectionInterface.TcpCandidatePolicy */
   public enum TcpCandidatePolicy {
     ENABLED, DISABLED
   };
+
+  /** Java version of rtc::KeyType */
+  public enum KeyType {
+    RSA, ECDSA
+  }
+
+  /** Java version of PeerConnectionInterface.ContinualGatheringPolicy */
+  public enum ContinualGatheringPolicy {
+    GATHER_ONCE, GATHER_CONTINUALLY
+  }
 
   /** Java version of PeerConnectionInterface.RTCConfiguration */
   public static class RTCConfiguration {
@@ -138,6 +149,9 @@ public class PeerConnection {
     public TcpCandidatePolicy tcpCandidatePolicy;
     public int audioJitterBufferMaxPackets;
     public boolean audioJitterBufferFastAccelerate;
+    public int iceConnectionReceivingTimeout;
+    public KeyType keyType;
+    public ContinualGatheringPolicy continualGatheringPolicy;
 
     public RTCConfiguration(List<IceServer> iceServers) {
       iceTransportsType = IceTransportsType.ALL;
@@ -147,6 +161,9 @@ public class PeerConnection {
       this.iceServers = iceServers;
       audioJitterBufferMaxPackets = 50;
       audioJitterBufferFastAccelerate = false;
+      iceConnectionReceivingTimeout = -1;
+      keyType = KeyType.ECDSA;
+      continualGatheringPolicy = ContinualGatheringPolicy.GATHER_ONCE;
     }
   };
 
@@ -180,10 +197,7 @@ public class PeerConnection {
   public native void setRemoteDescription(
       SdpObserver observer, SessionDescription sdp);
 
-  public native void setIceConnectionReceivingTimeout(int timeoutMs);
-
-  public native boolean updateIce(
-      List<IceServer> iceServers, MediaConstraints constraints);
+  public native boolean setConfiguration(RTCConfiguration config);
 
   public boolean addIceCandidate(IceCandidate candidate) {
     return nativeAddIceCandidate(
