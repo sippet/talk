@@ -69,7 +69,7 @@ static const CodecPref kCodecPrefs[] = {
   { kOpusCodecName,   48000, 2, 111, true,  { 10, 20, 40, 60 } },
   { kIsacCodecName,   16000, 1, 103, true,  { 30, 60 } },
   { kIsacCodecName,   32000, 1, 104, true,  { 30 } },
-  { kG729CodecName,    8000, 1, 18,  false, { } },
+  { kG729CodecName,    8000, 1, 18,  false, { 10, 20, 40, 60 } },
   // G722 should be advertised as 8000 Hz because of the RFC "bug".
   { kG722CodecName,   8000,  1, 9,   false, { 10, 20, 30, 40, 50, 60 } },
   { kIlbcCodecName,   8000,  1, 102, false, { 20, 30, 40, 60 } },
