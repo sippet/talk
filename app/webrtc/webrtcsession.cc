@@ -558,8 +558,7 @@ WebRtcSession::WebRtcSession(
       dtls_enabled_(false),
       data_channel_type_(cricket::DCT_NONE),
       ice_restart_latch_(new IceRestartAnswerLatch),
-      metrics_observer_(NULL),
-      compatibility_mode_(true) {
+      metrics_observer_(NULL) {
   transport_controller()->SignalConnectionState.connect(
       this, &WebRtcSession::OnTransportControllerConnectionState);
   transport_controller()->SignalReceiving.connect(
@@ -971,42 +970,6 @@ bool WebRtcSession::SetRemoteDescription(SessionDescriptionInterface* desc,
       ice_connection_state_ == PeerConnectionInterface::kIceConnectionNew) {
     SetIceConnectionState(PeerConnectionInterface::kIceConnectionChecking);
   }
-
-  if (compatibility_mode_) {
-    bool has_candidates = false;
-    for (size_t m = 0; m < desc->number_of_mediasections(); ++m) {
-      const IceCandidateCollection* candidates = desc->candidates(m);
-      if (candidates->count() > 0) {
-        has_candidates = true;
-        break;
-      }
-    }
-    if (!has_candidates) {
-      // Emulate a single remote candidate for each media
-      size_t mediacontent_index = 0;
-      cricket::ContentInfos &infos = desc->description()->contents();
-      for (ContentInfos::const_iterator i = infos.begin();
-           i != infos.end(); ++i, ++mediacontent_index) {
-        const cricket::TransportDescription *td =
-            desc->description()->GetTransportDescriptionByName(i->name);
-        // Add two components: one for RTP, another for RTCP
-        // RTP: component 1, RTCP: component 2
-        for (int component = 0; component < 2; ++component) {
-          cricket::Candidate c;
-          c.set_component(component+1);
-          c.set_type("local");
-          c.set_protocol("udp");
-          c.set_address(rtc::SocketAddress(td->default_address.hostname(),
-              td->default_address.port() + component));
-          c.set_priority(1);
-
-          JsepIceCandidate candidate("", mediacontent_index, c);
-          UseCandidate(&candidate);
-        }
-      }
-    }
-  }
-
   return true;
 }
 
@@ -1990,10 +1953,8 @@ bool WebRtcSession::ValidateSessionDescription(
   }
 
   // Verify ice-ufrag and ice-pwd.
-  if (!compatibility_mode_) {
-    if (!VerifyIceUfragPwdPresent(sdesc->description())) {
-      return BadSdp(source, type, kSdpWithoutIceUfragPwd, err_desc);
-    }
+  if (!VerifyIceUfragPwdPresent(sdesc->description())) {
+    return BadSdp(source, type, kSdpWithoutIceUfragPwd, err_desc);
   }
 
   if (!ValidateBundleSettings(sdesc->description())) {
